@@ -30,96 +30,108 @@ def test_ebay_homepage_loads(page: Page,
             f"Search box should be visible on {playwright_browser_name}"
 
 
-# @allure.epic("eBay Tests")
-# @allure.feature("Search Functionality")
-# @pytest.mark.regression
-# def test_ebay_search_functionality(page: Page,
-# playwright_browser_name: str,
-# browser_context_args):
-#     """Test eBay search functionality using both CSS and XPath selectors"""
-# 
-#     with allure.step(f"Navigate to eBay and search for item on {playwright_browser_name}"):
-#         ebay_page = EbayPage(page)
-#         ebay_page.navigate_to()
-#         ebay_page.wait_for_page_load()
-# 
-#         # Search with automatic fallback: XPath first, then CSS
-#         ebay_page.search_for_item("laptop")
-# 
-#         # Wait for results page
-#         page.wait_for_load_state("networkidle")
-# 
-#         allure.attach(
-#             page.url,
-#             name="Search Results URL",
-#             attachment_type=allure.attachment_type.TEXT
-#         )
-# 
-#     with allure.step(f"Verify search results page loaded on {playwright_browser_name}"):
-#         # Verify we're on search results page
-#         assert "laptop" in page.url.lower() or "srp" in page.url.lower(), \
-#             f"Should be on search results page on {playwright_browser_name}"
-# 
-# 
-# @allure.epic("eBay Tests")
-# @allure.feature("Navigation Elements")
-# @pytest.mark.regression
-# def test_ebay_navigation_elements(page: Page, playwright_browser_name: str):
-#     """Test that major navigation elements are present and clickable"""
-# 
-#     with allure.step(f"Navigate to eBay homepage on {playwright_browser_name}"):
-#         ebay_page = EbayPage(page)
-#         ebay_page.navigate_to()
-#         ebay_page.wait_for_page_load()
-# 
-#     with allure.step(f"Verify logo is present on {playwright_browser_name}"):
-#         # Uses automatic fallback: XPath first, then CSS
-#         logo_present = ebay_page.is_element_present_with_fallback(
-#             ebay_page.LOGO_XPATH,
-#             ebay_page.LOGO_CSS
-#         )
-#         assert logo_present, f"Logo should be present on {playwright_browser_name}"
-# 
-#     with allure.step(f"Verify Daily Deals link is present on {playwright_browser_name}"):
-#         daily_deals_present = ebay_page.is_element_present_with_fallback(
-#             ebay_page.DAILY_DEALS_XPATH,
-#             ebay_page.DAILY_DEALS_CSS
-#         )
-#         assert daily_deals_present, f"Daily Deals link should be present on {playwright_browser_name}"
-# 
-#     with allure.step(f"Verify Sell link is present on {playwright_browser_name}"):
-#         sell_present = ebay_page.is_element_present_with_fallback(
-#             ebay_page.SELL_LINK_XPATH,
-#             ebay_page.SELL_LINK_CSS
-#         )
-#         assert sell_present, f"Sell link should be present on {playwright_browser_name}"
-# 
-# 
-# @allure.epic("eBay Tests")
-# @allure.feature("User Account Elements")
-# @pytest.mark.smoke
-# def test_ebay_account_elements(page: Page, playwright_browser_name: str):
-#     """Test that account-related elements are present"""
-# 
-#     with allure.step(f"Navigate to eBay homepage on {playwright_browser_name}"):
-#         ebay_page = EbayPage(page)
-#         ebay_page.navigate_to()
-#         ebay_page.wait_for_page_load()
-# 
-#     with allure.step(f"Verify Sign in link is present on {playwright_browser_name}"):
-#         # Uses automatic fallback: XPath first, then CSS
-#         sign_in_present = ebay_page.is_element_present_with_fallback(
-#             ebay_page.SIGN_IN_XPATH,
-#             ebay_page.SIGN_IN_CSS,
-#             timeout=5000
-#         )
-#         assert sign_in_present, f"Sign in link should be present on {playwright_browser_name}"
-# 
-#     with allure.step(f"Verify My eBay dropdown is present on {playwright_browser_name}"):
-#         # Uses automatic fallback: XPath first, then CSS
-#         my_ebay_present = ebay_page.is_element_present_with_fallback(
-#             ebay_page.MY_EBAY_DROPDOWN_XPATH,
-#             ebay_page.MY_EBAY_DROPDOWN_CSS,
-#             timeout=5000
-#         )
-#         assert my_ebay_present, f"My eBay dropdown should be present on {playwright_browser_name}"
+@allure.epic("eBay Tests")
+@allure.feature("Search with Price Filter")
+@pytest.mark.regression
+def test_ebay_search_with_price_filter(page: Page, playwright_browser_name: str):
+    """Test eBay search with price filtering and pagination"""
+    
+    ebay_page = EbayPage(page)
+    query = "laptop"
+    max_price = 500.0
+    limit = 5
+    
+    with allure.step(f"Search for '{query}' with max price ${max_price} on {playwright_browser_name}"):
+        items = ebay_page.search_items_by_name_under_price(
+            query=query,
+            max_price=max_price,
+            limit=limit
+        )
+        
+        allure.attach(
+            f"Found {len(items)} items matching criteria",
+            name="Search Results Count",
+            attachment_type=allure.attachment_type.TEXT
+        )
+    
+    with allure.step(f"Verify items were returned on {playwright_browser_name}"):
+        assert len(items) > 0, \
+            f"Should find at least one item for '{query}' with max price ${max_price} on {playwright_browser_name}"
+    
+    with allure.step(f"Verify all returned items are URLs on {playwright_browser_name}"):
+        for i, url in enumerate(items):
+            assert isinstance(url, str), \
+                f"Item {i+1} should be a URL string on {playwright_browser_name}"
+            assert url.startswith('http'), \
+                f"Item {i+1} should be a valid URL starting with 'http' on {playwright_browser_name}"
+    
+    with allure.step(f"Attach search results summary on {playwright_browser_name}"):
+        results_summary = f"Found {len(items)} items for '{query}' with max price ${max_price}:\n\n"
+        for i, url in enumerate(items, 1):
+            results_summary += f"{i}. {url}\n"
+        
+        allure.attach(
+            results_summary,
+            name="Search Results URLs",
+            attachment_type=allure.attachment_type.TEXT
+        )
+
+
+@allure.epic("eBay Tests")
+@allure.feature("Add Items to Cart")
+@pytest.mark.regression
+def test_ebay_add_items_to_cart(page: Page, playwright_browser_name: str):
+    """Test adding multiple items to cart from search results"""
+    
+    ebay_page = EbayPage(page)
+    query = "laptop"
+    max_price = 500.0
+    limit = 3  # Limit to 3 items for testing
+    
+    with allure.step(f"Search for '{query}' with max price ${max_price} on {playwright_browser_name}"):
+        product_urls = ebay_page.search_items_by_name_under_price(
+            query=query,
+            max_price=max_price,
+            limit=limit
+        )
+        
+        allure.attach(
+            f"Found {len(product_urls)} product URLs to add to cart",
+            name="Products to Add",
+            attachment_type=allure.attachment_type.TEXT
+        )
+    
+    with allure.step(f"Verify product URLs were found on {playwright_browser_name}"):
+        assert len(product_urls) > 0, \
+            f"Should find at least one product URL for '{query}' with max price ${max_price} on {playwright_browser_name}"
+    
+    with allure.step(f"Add items to cart on {playwright_browser_name}"):
+        # Add items to cart
+        ebay_page.add_item_to_cart(product_urls)
+        
+        allure.attach(
+            f"Attempted to add {len(product_urls)} items to cart",
+            name="Cart Addition Summary",
+            attachment_type=allure.attachment_type.TEXT
+        )
+    
+    with allure.step(f"Verify we're back on main page on {playwright_browser_name}"):
+        # Verify we're back on the main page after adding items
+        assert "ebay.com" in page.url.lower(), \
+            f"Should be on eBay main page after adding items on {playwright_browser_name}"
+        
+        # Verify search box is visible (indicates we're on main page)
+        assert ebay_page.is_search_box_visible(), \
+            f"Search box should be visible on main page on {playwright_browser_name}"
+    
+    with allure.step(f"Attach product URLs that were processed on {playwright_browser_name}"):
+        urls_summary = f"Processed {len(product_urls)} product URLs:\n\n"
+        for i, url in enumerate(product_urls, 1):
+            urls_summary += f"{i}. {url}\n"
+        
+        allure.attach(
+            urls_summary,
+            name="Product URLs Processed",
+            attachment_type=allure.attachment_type.TEXT
+        )
+

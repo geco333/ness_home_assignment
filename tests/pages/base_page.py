@@ -15,7 +15,7 @@ class BasePage:
         
         full_url = f"{self.base_url}/{url}" if url else self.base_url
         
-        self.page.goto(full_url)
+        self.page.goto(full_url, wait_until="networkidle")
     
     def find_element(self, selector: str) -> Locator:
         """Find an element by selector"""
