@@ -1,0 +1,7 @@
+[node]
+    detect-drivers = false
+
+    [[node.driver-configurations]]
+        display-name = "Chrome 114"
+        max-sessions = 2
+        stereotype = '{"browserName": "chrome", "browserVersion": "114", "platformName": "Windows 11"}'
