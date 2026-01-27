@@ -1,0 +1,13 @@
+[
+  {
+    "name": "chromium-default-fullscreen",
+    "browser_name": "chromium",
+    "capabilities": {
+      "headless": false,
+      "slow_mo": 0
+    },
+    "context": {
+      "ignore_https_errors": true
+    }
+  }
+]
