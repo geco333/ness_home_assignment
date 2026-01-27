@@ -1,5 +1,8 @@
 import re
 
+import random
+import os
+from datetime import datetime
 from playwright.sync_api import Page
 
 from tests.pages.base_page import BasePage
@@ -160,6 +163,16 @@ class EbayPage(BasePage):
 
     # Generic option selectors (for any dropdown/select)
     OPTION_SELECTORS_XPATH = "//select[contains(@name, 'Color') or contains(@name, 'Size') or contains(@name, 'color') or contains(@name, 'size')] | //select[contains(@id, 'Color') or contains(@id, 'Size')]"
+    
+    # ==================== CART PAGE ELEMENTS ====================
+    
+    # Cart total/subtotal
+    CART_TOTAL_XPATH = "//span[contains(@class, 'cart-summary-total')] | //span[contains(@id, 'cart-total')] | //div[contains(@class, 'cart-total')]//span[contains(text(), '$')] | //span[contains(@class, 'total') and contains(text(), '$')] | //div[contains(@class, 'summary')]//span[contains(text(), '$')]"
+    CART_TOTAL_CSS = ".cart-summary-total, #cart-total, .cart-total span, .total"
+    
+    # Cart subtotal (alternative selector)
+    CART_SUBTOTAL_XPATH = "//span[contains(@class, 'subtotal')] | //div[contains(@class, 'subtotal')]//span[contains(text(), '$')] | //span[contains(@id, 'subtotal')]"
+    CART_SUBTOTAL_CSS = ".subtotal, #subtotal"
 
     # ==================== HELPER METHODS ====================
 
@@ -314,12 +327,12 @@ class EbayPage(BasePage):
     def search_items_by_name_under_price(self, query: str, max_price: float, limit: int) -> list:
         """
         Search eBay with price filtering and pagination.
-        
+
         Args:
             query: Search query string
             max_price: Maximum price filter (items must be <= this price)
             limit: Minimum number of items to retrieve
-            
+
         Returns:
             list: List of URLs for found items (at least 'limit' items, or fewer if not enough found)
         """
@@ -358,7 +371,8 @@ class EbayPage(BasePage):
         # Try to apply price filter if it exists
         try:
             # Look for max price filter input
-            price_filter_input = self.page.locator(self.PRICE_FILTER_MAX_XPATH).first
+            price_filter_input = self.page.locator(
+                self.PRICE_FILTER_MAX_XPATH).first
 
             if price_filter_input.is_visible(timeout=3000):
                 # Fill in the max price
@@ -366,7 +380,8 @@ class EbayPage(BasePage):
 
                 # Try to find and click apply button
                 try:
-                    apply_button = self.page.locator(self.PRICE_FILTER_APPLY_XPATH).first
+                    apply_button = self.page.locator(
+                        self.PRICE_FILTER_APPLY_XPATH).first
 
                     if apply_button.is_visible(timeout=2000):
                         apply_button.click()
@@ -389,12 +404,14 @@ class EbayPage(BasePage):
         while len(items) < limit and page_count < max_pages:
             # Wait for results to be visible
             try:
-                self.page.wait_for_selector(self.SEARCH_RESULT_ITEMS_XPATH, timeout=5000)
+                self.page.wait_for_selector(
+                    self.SEARCH_RESULT_ITEMS_XPATH, timeout=5000)
             except:
                 break  # No more results
 
             # Get all search result items on current page
-            result_items = self.page.locator(self.SEARCH_RESULT_ITEMS_XPATH).all()
+            result_items = self.page.locator(
+                self.SEARCH_RESULT_ITEMS_XPATH).all()
 
             for item in result_items:
                 if len(items) >= limit:
@@ -412,7 +429,8 @@ class EbayPage(BasePage):
                         if price <= max_price:
                             # Try to get URL using XPath
                             try:
-                                link_element = item.locator(".//a[contains(@class, 's-item__link')]").first
+                                link_element = item.locator(
+                                    ".//a[contains(@class, 's-item__link')]").first
 
                                 if link_element.is_visible(timeout=500):
                                     url = link_element.get_attribute('href')
@@ -443,15 +461,16 @@ class EbayPage(BasePage):
                 # We have enough items
                 break
 
-        return items[:limit]  # Return exactly 'limit' items (or fewer if not enough found)
+        # Return exactly 'limit' items (or fewer if not enough found)
+        return items[:limit]
 
     def add_item_to_cart(self, product_urls: list[str]) -> None:
         """
         Add multiple items to cart from product URLs.
-        
+
         Args:
             product_urls: List of product URLs to add to cart
-            
+
         For each URL:
         - Navigates to product page
         - Takes a screenshot
@@ -459,9 +478,6 @@ class EbayPage(BasePage):
         - Adds product to cart
         - Returns to main page
         """
-        import random
-        import os
-        from datetime import datetime
 
         # Create screenshots directory if it doesn't exist
         screenshots_dir = "reports/product_screenshots"
@@ -484,43 +500,43 @@ class EbayPage(BasePage):
                 # Handle product options (color, size, etc.) - randomly select if available
                 try:
                     # Try to find and select color option
-                    color_select = self.page.locator(self.COLOR_SELECTOR_XPATH).first
-                    
+                    color_select = self.page.locator(
+                        self.COLOR_SELECTOR_XPATH).first
                     if color_select.is_visible(timeout=2000):
                         # Get all color options
-                        color_options = color_select.locator("option:not([value='']):not([disabled])").all()
+                        color_options = color_select.locator(
+                            "option:not([value='']):not([disabled])").all()
                         if len(color_options) > 1:  # More than just the default/placeholder
                             # Get option values
                             option_values = []
                             for opt in color_options:
                                 value = opt.get_attribute('value')
-                                
                                 if value and value.strip():
                                     option_values.append(value)
 
                             if option_values:
                                 # Randomly select a color
                                 selected_color = random.choice(option_values)
-                                color_select.select_option(value=selected_color)
-                                self.page.wait_for_timeout(500)  # Wait for page to update
+                                color_select.select_option(
+                                    value=selected_color)
+                                # Wait for page to update
+                                self.page.wait_for_timeout(500)
                 except:
                     pass  # No color selector available
 
                 try:
                     # Try to find and select size option
-                    size_select = self.page.locator(self.SIZE_SELECTOR_XPATH).first
-                    
+                    size_select = self.page.locator(
+                        self.SIZE_SELECTOR_XPATH).first
                     if size_select.is_visible(timeout=2000):
                         # Get all size options
-                        size_options = size_select.locator("option:not([value='']):not([disabled])").all()
-                        
+                        size_options = size_select.locator(
+                            "option:not([value='']):not([disabled])").all()
                         if len(size_options) > 1:  # More than just the default/placeholder
                             # Get option values
                             option_values = []
-                            
                             for opt in size_options:
                                 value = opt.get_attribute('value')
-                                
                                 if value and value.strip():
                                     option_values.append(value)
 
@@ -528,29 +544,29 @@ class EbayPage(BasePage):
                                 # Randomly select a size
                                 selected_size = random.choice(option_values)
                                 size_select.select_option(value=selected_size)
-                                self.page.wait_for_timeout(500)  # Wait for page to update
+                                # Wait for page to update
+                                self.page.wait_for_timeout(500)
                 except:
                     pass  # No size selector available
 
                 # Try generic option selectors if color/size didn't work
                 try:
-                    generic_selects = self.page.locator(self.OPTION_SELECTORS_XPATH).all()
-                    
+                    generic_selects = self.page.locator(
+                        self.OPTION_SELECTORS_XPATH).all()
                     for select in generic_selects:
                         if select.is_visible(timeout=1000):
-                            options = select.locator("option:not([value='']):not([disabled])").all()
-                            
+                            options = select.locator(
+                                "option:not([value='']):not([disabled])").all()
                             if len(options) > 1:
                                 option_values = []
-                                
                                 for opt in options:
                                     value = opt.get_attribute('value')
-                                    
                                     if value and value.strip():
                                         option_values.append(value)
 
                                 if option_values:
-                                    selected_value = random.choice(option_values)
+                                    selected_value = random.choice(
+                                        option_values)
                                     select.select_option(value=selected_value)
                                     self.page.wait_for_timeout(500)
                 except:
@@ -558,7 +574,8 @@ class EbayPage(BasePage):
 
                 # Add item to cart
                 try:
-                    add_to_cart_button = self.page.locator(self.ADD_TO_CART_XPATH).first
+                    add_to_cart_button = self.page.locator(
+                        self.ADD_TO_CART_XPATH).first
                     if add_to_cart_button.is_visible(timeout=3000):
                         add_to_cart_button.click()
                         # Wait for cart action to complete
@@ -581,3 +598,100 @@ class EbayPage(BasePage):
                 except:
                     pass
                 continue
+    
+    def assert_cart_total_not_exceeds(self, budget_per_item: float, item_count: int) -> None:
+        """
+        Open cart and assert that the total cost does not exceed item_count * budget_per_item.
+        
+        Args:
+            budget_per_item: Maximum budget allowed per item
+            item_count: Number of items expected in cart
+            
+        Raises:
+            AssertionError: If cart total exceeds the budget limit
+        """
+
+        # Open the cart
+        self.click_cart()
+        self.page.wait_for_load_state("networkidle")
+        
+        # Wait a bit for cart page to fully load
+        self.page.wait_for_timeout(1000)
+        
+        # Take screenshot of cart page
+        screenshots_dir = "reports/product_screenshots"
+        os.makedirs(screenshots_dir, exist_ok=True)
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        screenshot_path = f"{screenshots_dir}/cart_{timestamp}.png"
+        self.page.screenshot(path=screenshot_path)
+        
+        # Calculate maximum allowed total
+        max_total = item_count * budget_per_item
+        
+        # Try to find cart total using multiple selectors
+        cart_total = None
+        cart_total_text = None
+        
+        # Try cart total selector first
+        try:
+            total_element = self.page.locator(self.CART_TOTAL_XPATH).first
+
+            if total_element.is_visible(timeout=3000):
+                cart_total_text = total_element.inner_text()
+        except:
+            pass
+        
+        # If not found, try subtotal selector
+        if not cart_total_text:
+            try:
+                subtotal_element = self.page.locator(self.CART_SUBTOTAL_XPATH).first
+                if subtotal_element.is_visible(timeout=3000):
+                    cart_total_text = subtotal_element.inner_text()
+            except:
+                pass
+        
+        # If still not found, try to find any element containing total/subtotal text
+        if not cart_total_text:
+            try:
+                # Look for common cart total patterns
+                total_patterns = [
+                    "//span[contains(text(), 'Total') and contains(text(), '$')]",
+                    "//span[contains(text(), 'Subtotal') and contains(text(), '$')]",
+                    "//div[contains(text(), 'Total') and contains(text(), '$')]",
+                    "//*[contains(@class, 'total') and contains(text(), '$')]",
+                ]
+                
+                for pattern in total_patterns:
+                    try:
+                        element = self.page.locator(pattern).first
+                        if element.is_visible(timeout=1000):
+                            cart_total_text = element.inner_text()
+                            break
+                    except:
+                        continue
+            except:
+                pass
+        
+        # Extract numeric value from cart total text
+        if cart_total_text:
+            # Remove currency symbols and extract number
+            total_text = cart_total_text.replace('$', '').replace(',', '').strip()
+            
+            # Extract first number (handles cases like "Total: $123.45")
+            match = re.search(r'(\d+\.?\d*)', total_text)
+            
+            if match:
+                cart_total = float(match.group(1))
+        
+        # Assert that cart total does not exceed budget
+        if cart_total is None:
+            raise AssertionError(
+                f"Could not find cart total on cart page. "
+                f"Expected maximum total: ${max_total:.2f} (${budget_per_item:.2f} × {item_count} items)"
+            )
+        
+        assert cart_total <= max_total, (
+            f"Cart total ${cart_total:.2f} exceeds maximum allowed budget of ${max_total:.2f} "
+            f"(${budget_per_item:.2f} per item × {item_count} items)"
+        )
