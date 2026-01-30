@@ -8,10 +8,7 @@ from tests.pages.ebay_page import EbayPage
 @allure.epic("eBay Tests")
 @allure.feature("Homepage Navigation")
 @pytest.mark.smoke
-def test_ebay_homepage_loads(page: Page,
-                             playwright_browser_name,
-                             browser_type_launch_args,
-                             browser_context_args):
+def test_ebay_homepage_loads(page: Page, playwright_browser_name):
     """Test that eBay homepage loads correctly"""
 
     with allure.step(f"Navigate to eBay homepage on {playwright_browser_name}"):
@@ -67,6 +64,7 @@ def test_ebay_search_with_price_filter(page: Page, playwright_browser_name: str)
     
     with allure.step(f"Attach search results summary on {playwright_browser_name}"):
         results_summary = f"Found {len(items)} items for '{query}' with max price ${max_price}:\n\n"
+        
         for i, url in enumerate(items, 1):
             results_summary += f"{i}. {url}\n"
         

@@ -1,8 +1,8 @@
-import re
-
-import random
 import os
+import random
+import re
 from datetime import datetime
+
 from playwright.sync_api import Page
 
 from tests.pages.base_page import BasePage
@@ -130,18 +130,20 @@ class EbayPage(BasePage):
     SORT_DROPDOWN_CSS = "select#s0-1-17-6-5-4\\[0\\]-72\\[1\\]-_salic"
 
     # Price filter input (max price)
-    PRICE_FILTER_MAX_XPATH = "//input[@aria-label='Maximum Price'] | //input[contains(@aria-label, 'Max') and contains(@aria-label, 'Price')] | //input[@placeholder='Max']"
-    PRICE_FILTER_MAX_CSS = "input[aria-label*='Max'][aria-label*='Price'], input[placeholder='Max']"
+    PRICE_FILTER_MAX_XPATH = "//*[@id='s0-2-54-0-9-8-0-1-2-0-4-1-26[4]-@textrange-@endParamValue-textbox']"
+    PRICE_FILTER_MAX_CSS = "#s0-2-54-0-9-8-0-1-2-0-4-1-26\[4\]-\@textrange-\@endParamValue-textbox"
 
     # Price filter apply button
-    PRICE_FILTER_APPLY_XPATH = "//button[contains(text(), 'Apply')] | //button[@aria-label='Apply'] | //input[@value='Apply']"
-    PRICE_FILTER_APPLY_CSS = "button:has-text('Apply'), input[value='Apply']"
+    PRICE_FILTER_APPLY_XPATH = "//*[@id='x-refine__group__4']/div[1]/div[2]/div[1]/div/div[3]/button"
+    PRICE_FILTER_APPLY_CSS = "#x-refine__group__4 > div.x-refine__price > div:nth-child(2) > div.x-item > div > div.x-textrange__button > button"
 
     # Search result items container
-    SEARCH_RESULT_ITEMS_XPATH = "//ul[contains(@class, 'srp-results')]//li[contains(@class, 's-item')]"
+    SEARCH_RESULT_ITEMS_XPATH = "//*[@id='srp-river-results']/ul/li"
+    SEARCH_RESULT_ITEMS_CSS = "#srp-river-results > ul > li"
 
     # Individual item price XPath (various formats)
-    ITEM_PRICE_XPATH = ".//span[contains(@class, 's-item__price')] | .//span[contains(@class, 'price')] | .//span[contains(text(), '$')]"
+    ITEM_PRICE_XPATH = "div/div[2]/div[2]/div/div/span"
+    ITEM_URL_XPATH = "div/div[2]/div/a"
 
     # Next page button
     NEXT_PAGE_XPATH = "//a[@aria-label='Go to next search page'] | //a[contains(@class, 'pagination__next')] | //a[contains(text(), 'Next')] | //button[contains(@aria-label, 'next')]"
@@ -163,13 +165,13 @@ class EbayPage(BasePage):
 
     # Generic option selectors (for any dropdown/select)
     OPTION_SELECTORS_XPATH = "//select[contains(@name, 'Color') or contains(@name, 'Size') or contains(@name, 'color') or contains(@name, 'size')] | //select[contains(@id, 'Color') or contains(@id, 'Size')]"
-    
+
     # ==================== CART PAGE ELEMENTS ====================
-    
+
     # Cart total/subtotal
     CART_TOTAL_XPATH = "//span[contains(@class, 'cart-summary-total')] | //span[contains(@id, 'cart-total')] | //div[contains(@class, 'cart-total')]//span[contains(text(), '$')] | //span[contains(@class, 'total') and contains(text(), '$')] | //div[contains(@class, 'summary')]//span[contains(text(), '$')]"
     CART_TOTAL_CSS = ".cart-summary-total, #cart-total, .cart-total span, .total"
-    
+
     # Cart subtotal (alternative selector)
     CART_SUBTOTAL_XPATH = "//span[contains(@class, 'subtotal')] | //div[contains(@class, 'subtotal')]//span[contains(text(), '$')] | //span[contains(@id, 'subtotal')]"
     CART_SUBTOTAL_CSS = ".subtotal, #subtotal"
@@ -364,37 +366,27 @@ class EbayPage(BasePage):
 
         # Perform the search
         self.search_for_item(query)
+        # Use "load" instead of "networkidle" to avoid hanging on sites with ongoing requests (e.g. eBay)
+        self.page.wait_for_load_state("load", timeout=15000)
 
-        # Wait for search results to load
-        self.page.wait_for_load_state("networkidle")
-
-        # Try to apply price filter if it exists
+        # Look for max price filter input (with timeout to avoid hanging if element missing)
         try:
-            # Look for max price filter input
-            price_filter_input = self.page.locator(
-                self.PRICE_FILTER_MAX_XPATH).first
+            price_filter_input = self.page.locator(self.PRICE_FILTER_MAX_XPATH).first
+            # Short timeout so we don't hang if selector is wrong or element not present
+            price_filter_input.wait_for(state="visible", timeout=8000)
+            price_filter_input.scroll_into_view_if_needed(timeout=5000)
+            self.page.wait_for_timeout(1500)
 
-            if price_filter_input.is_visible(timeout=3000):
-                # Fill in the max price
-                price_filter_input.fill(str(max_price))
+            filled_price = str(max_price)
+            price_filter_input.press_sequentially(filled_price)
 
-                # Try to find and click apply button
-                try:
-                    apply_button = self.page.locator(
-                        self.PRICE_FILTER_APPLY_XPATH).first
+            apply_button = self.page.locator(self.PRICE_FILTER_APPLY_XPATH).first
+            apply_button.click(timeout=5000)
 
-                    if apply_button.is_visible(timeout=2000):
-                        apply_button.click()
-
-                        # Wait for filtered results to load
-                        self.page.wait_for_load_state("networkidle")
-                except:
-                    # If no apply button, try pressing Enter on the input
-                    price_filter_input.press("Enter")
-                    self.page.wait_for_load_state("networkidle")
-        except:
-            # Price filter not available, continue without it
-            pass
+            # Wait for filtered results to load (use "load" to avoid hanging on networkidle)
+            self.page.wait_for_load_state("load", timeout=15000)
+        except Exception as e:
+            print(f"Price filter step skipped or failed: {e}. Continuing to collect items.")
 
         items: list[str] = []
         page_count = 0
@@ -404,42 +396,71 @@ class EbayPage(BasePage):
         while len(items) < limit and page_count < max_pages:
             # Wait for results to be visible
             try:
-                self.page.wait_for_selector(
-                    self.SEARCH_RESULT_ITEMS_XPATH, timeout=5000)
-            except:
-                break  # No more results
+                self.page.wait_for_selector(self.SEARCH_RESULT_ITEMS_XPATH, timeout=10000)
+                result_items = self.page.locator(self.SEARCH_RESULT_ITEMS_XPATH).all()
 
-            # Get all search result items on current page
-            result_items = self.page.locator(
-                self.SEARCH_RESULT_ITEMS_XPATH).all()
+                if not result_items or len(result_items) == 0:
+                    print(f"No result items found on page {page_count + 1}")
+                    break
 
-            for item in result_items:
+                print(f"Found {len(result_items)} result items on page {page_count + 1}")
+            except Exception as e:
+                print(f"No search results found on page {page_count + 1}: {e}")
+                break
+
+            for i, item in enumerate(result_items, start=1):
                 if len(items) >= limit:
                     break
 
                 try:
                     # Extract price
-                    price_element = item.locator(self.ITEM_PRICE_XPATH).first
+                    price = float('inf')  # Default to infinity if price not found
+                    price_element = item.locator(f"//{self.ITEM_PRICE_XPATH}").first
 
-                    if price_element.is_visible(timeout=1000):
-                        price_text = price_element.inner_text()
-                        price = extract_price(price_text)
+                    try:
+                        if price_element.is_visible(timeout=1000):
+                            price_text = price_element.inner_text()
+                            price = extract_price(price_text)
+                    except:
+                        # Price element not found or not visible, try alternative methods
+                        price = 0
 
-                        # Only include items with price <= max_price
-                        if price <= max_price:
-                            # Try to get URL using XPath
-                            try:
-                                link_element = item.locator(
-                                    ".//a[contains(@class, 's-item__link')]").first
+                    # Only include items with price <= max_price
+                    if price <= max_price:
+                        # Try multiple methods to get URL
+                        url = None
 
-                                if link_element.is_visible(timeout=500):
-                                    url = link_element.get_attribute('href')
-                                    if url and url not in items:  # Avoid duplicates
-                                        items.append(url)
-                            except:
-                                pass
-                except:
+                        url = item.locator(f"//{self.ITEM_URL_XPATH}").first.get_attribute('href')
+
+                        # Clean and validate URL
+                        if url:
+                            # Convert to string and strip whitespace
+                            url = str(url).strip()
+
+                            # Skip empty URLs
+                            if not url or url == 'None' or url == 'null':
+                                continue
+
+                            # Remove query parameters that might cause duplicates (but keep important ones)
+                            if '?' in url:
+                                # Keep the URL up to the query string for now, or split if needed
+                                base_url = url.split('?')[0]
+                                
+                                # Only use base URL if it contains /itm/
+                                if '/itm/' in base_url:
+                                    url = base_url
+
+                            # Validate URL contains ebay.com or /itm/
+                            if 'ebay.com' not in url and '/itm/' not in url:
+                                continue
+
+                            # Avoid duplicates
+                            if url and url not in items:
+                                items.append(url)
+                                print(f"Collected URL {len(items)}/{limit}: {url[:80]}...")
+                except Exception as e:
                     # Skip items that can't be processed
+                    print(f"Error processing item: {e}")
                     continue
 
             # Check if we need more items and if there's a next page
@@ -449,7 +470,7 @@ class EbayPage(BasePage):
 
                     if next_button.is_visible(timeout=2000) and next_button.is_enabled():
                         next_button.click()
-                        self.page.wait_for_load_state("networkidle")
+                        self.page.wait_for_load_state("load", timeout=15000)
                         page_count += 1
                     else:
                         # No more pages available
@@ -487,7 +508,7 @@ class EbayPage(BasePage):
             try:
                 # Navigate to product page
                 self.page.goto(url)
-                self.page.wait_for_load_state("networkidle")
+                self.page.wait_for_load_state("load", timeout=15000)
 
                 # Wait a bit for page to fully render
                 self.page.wait_for_timeout(1000)
@@ -598,7 +619,7 @@ class EbayPage(BasePage):
                 except:
                     pass
                 continue
-    
+
     def assert_cart_total_not_exceeds(self, budget_per_item: float, item_count: int) -> None:
         """
         Open cart and assert that the total cost does not exceed item_count * budget_per_item.
@@ -613,11 +634,11 @@ class EbayPage(BasePage):
 
         # Open the cart
         self.click_cart()
-        self.page.wait_for_load_state("networkidle")
-        
+        self.page.wait_for_load_state("load", timeout=15000)
+
         # Wait a bit for cart page to fully load
         self.page.wait_for_timeout(1000)
-        
+
         # Take screenshot of cart page
         screenshots_dir = "reports/product_screenshots"
         os.makedirs(screenshots_dir, exist_ok=True)
@@ -625,14 +646,14 @@ class EbayPage(BasePage):
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         screenshot_path = f"{screenshots_dir}/cart_{timestamp}.png"
         self.page.screenshot(path=screenshot_path)
-        
+
         # Calculate maximum allowed total
         max_total = item_count * budget_per_item
-        
+
         # Try to find cart total using multiple selectors
         cart_total = None
         cart_total_text = None
-        
+
         # Try cart total selector first
         try:
             total_element = self.page.locator(self.CART_TOTAL_XPATH).first
@@ -641,7 +662,7 @@ class EbayPage(BasePage):
                 cart_total_text = total_element.inner_text()
         except:
             pass
-        
+
         # If not found, try subtotal selector
         if not cart_total_text:
             try:
@@ -650,7 +671,7 @@ class EbayPage(BasePage):
                     cart_total_text = subtotal_element.inner_text()
             except:
                 pass
-        
+
         # If still not found, try to find any element containing total/subtotal text
         if not cart_total_text:
             try:
@@ -661,7 +682,7 @@ class EbayPage(BasePage):
                     "//div[contains(text(), 'Total') and contains(text(), '$')]",
                     "//*[contains(@class, 'total') and contains(text(), '$')]",
                 ]
-                
+
                 for pattern in total_patterns:
                     try:
                         element = self.page.locator(pattern).first
@@ -672,25 +693,25 @@ class EbayPage(BasePage):
                         continue
             except:
                 pass
-        
+
         # Extract numeric value from cart total text
         if cart_total_text:
             # Remove currency symbols and extract number
             total_text = cart_total_text.replace('$', '').replace(',', '').strip()
-            
+
             # Extract first number (handles cases like "Total: $123.45")
             match = re.search(r'(\d+\.?\d*)', total_text)
-            
+
             if match:
                 cart_total = float(match.group(1))
-        
+
         # Assert that cart total does not exceed budget
         if cart_total is None:
             raise AssertionError(
                 f"Could not find cart total on cart page. "
                 f"Expected maximum total: ${max_total:.2f} (${budget_per_item:.2f} × {item_count} items)"
             )
-        
+
         assert cart_total <= max_total, (
             f"Cart total ${cart_total:.2f} exceeds maximum allowed budget of ${max_total:.2f} "
             f"(${budget_per_item:.2f} per item × {item_count} items)"
