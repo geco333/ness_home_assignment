@@ -1,6 +1,16 @@
+# Test framework
 pytest==7.4.3
-pytest-playwright==0.4.3
-allure-pytest==2.13.2
 pytest-xdist==3.5.0
+
+# Playwright (browser automation). After pip install, run: playwright install
+playwright>=1.40.0,<2
+pytest-playwright==0.4.3
+
+# Reporting
+allure-pytest==2.13.2
+
+# Config / env
 python-dotenv==1.0.0
+
+# HTTP (optional; for API/helpers if needed)
 requests==2.31.0
