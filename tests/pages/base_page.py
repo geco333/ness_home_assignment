@@ -85,7 +85,10 @@ class BasePage:
 
         return path
     
-    def find_element_with_fallback(self, *selectors: str, timeout: Optional[int] = None) -> Locator:
+    def find_element_with_fallback(self,
+                                   *selectors: str,
+                                   timeout: Optional[int] = None,
+                                   optional: bool = False) -> Optional[Locator]:
         """
         Find element with fallback mechanism: tries all provided selectors until one succeeds
         
@@ -93,6 +96,7 @@ class BasePage:
             *selectors: Variable number of selector strings. Can be any selector type 
                        (XPath, CSS, text, etc.). Can also pass a single list which will be unpacked.
             timeout: Timeout in milliseconds (default from settings)
+            optional: If true, return only the first selector found.
             
         Returns:
             Locator: The found element locator (first successful selector)
@@ -141,9 +145,14 @@ class BasePage:
         for i, selector in enumerate(selector_list):
             try:
                 locator = self.page.locator(selector)
-                locator.wait_for(state="visible", timeout=timeout_ms)
+                locator.first.scroll_into_view_if_needed(timeout=timeout_ms)
+                locator.first.wait_for(state="visible", timeout=timeout_ms)
+                
                 return locator
-            except PlaywrightTimeoutError as e:
+            except (Exception, PlaywrightTimeoutError) as e:
+                if optional:
+                    return
+                    
                 errors.append(f"Selector {i+1} ('{selector}'): {str(e)}")
                 continue
         

@@ -152,21 +152,19 @@ class EbayPage(BasePage):
     # ==================== PRODUCT PAGE ELEMENTS ====================
 
     # Add to cart button
-    ADD_TO_CART_XPATH = "//a[contains(@id, 'isCartBtn')] | //a[contains(text(), 'Add to cart')] | //button[contains(text(), 'Add to cart')] | //span[contains(text(), 'Add to cart')]/parent::a | //a[contains(@aria-label, 'Add to cart')]"
-    ADD_TO_CART_CSS = "a#isCartBtn, a:has-text('Add to cart'), button:has-text('Add to cart')"
+    ADD_TO_CART_XPATH = "//*[@id='atcBtn_btn_1']"
+    ADD_TO_CART_CSS = "#atcBtn_btn_1"
 
-    # Color selector/options
-    COLOR_SELECTOR_XPATH = "//select[contains(@name, 'Color') or contains(@id, 'Color')] | //select[contains(@aria-label, 'Color')] | //div[contains(@class, 'color')]//select | //select[contains(@name, 'color')]"
-    COLOR_OPTIONS_XPATH = "//select[contains(@name, 'Color') or contains(@id, 'Color')]//option | //select[contains(@aria-label, 'Color')]//option | //div[contains(@class, 'color')]//select//option"
+    ITEM_OPTIONS_BUTTON_XPATH = "//*[@id='mainContent']/div/div/div/span/button"
+    ITEM_OPTIONS_BUTTON_CSS = "#mainContent > div > div.vim.x-msku-evo.mar-t-16 > div > span > button"
 
-    # Size selector/options
-    SIZE_SELECTOR_XPATH = "//select[contains(@name, 'Size') or contains(@id, 'Size')] | //select[contains(@aria-label, 'Size')] | //div[contains(@class, 'size')]//select | //select[contains(@name, 'size')]"
-    SIZE_OPTIONS_XPATH = "//select[contains(@name, 'Size') or contains(@id, 'Size')]//option | //select[contains(@aria-label, 'Size')]//option | //div[contains(@class, 'size')]//select//option"
-
-    # Generic option selectors (for any dropdown/select)
-    OPTION_SELECTORS_XPATH = "//select[contains(@name, 'Color') or contains(@name, 'Size') or contains(@name, 'color') or contains(@name, 'size')] | //select[contains(@id, 'Color') or contains(@id, 'Size')]"
+    ITEM_OPTIONS_SELECTOR_XPATH = "//*[@id='mainContent']/div/div/div/span/div[@role='listbox']"
+    ITEM_OPTIONS_SELECTOR_CSS = "#mainContent > div > div.vim.x-msku-evo.mar-t-16 > div > span > div[role='listbox']"
 
     # ==================== CART PAGE ELEMENTS ====================
+
+    # Cart page URL (open cart directly when header cart icon is unavailable)
+    CART_URL = "https://cart.ebay.com/"
 
     # Cart total/subtotal
     CART_TOTAL_XPATH = "//span[contains(@class, 'cart-summary-total')] | //span[contains(@id, 'cart-total')] | //div[contains(@class, 'cart-total')]//span[contains(text(), '$')] | //span[contains(@class, 'total') and contains(text(), '$')] | //div[contains(@class, 'summary')]//span[contains(text(), '$')]"
@@ -445,7 +443,7 @@ class EbayPage(BasePage):
                             if '?' in url:
                                 # Keep the URL up to the query string for now, or split if needed
                                 base_url = url.split('?')[0]
-                                
+
                                 # Only use base URL if it contains /itm/
                                 if '/itm/' in base_url:
                                     url = base_url
@@ -485,6 +483,63 @@ class EbayPage(BasePage):
         # Return exactly 'limit' items (or fewer if not enough found)
         return items[:limit]
 
+    def _select_random_product_options(self) -> None:
+        """
+        If the item page has customization options (x-msku-evo listboxes),
+        randomly select a valid option for each (Processor, SSD Size, O/S, etc.).
+        Skips the placeholder 'Select' and disabled (out of stock) options.
+        """
+        try:
+            sku_section = self.page.locator("[data-testid='x-msku-evo']").first
+            if not sku_section.is_visible(timeout=2000):
+                return
+            sku_section.scroll_into_view_if_needed()
+
+            # Each option group has a button that opens a listbox
+            listbox_buttons = sku_section.locator("button.listbox-button__control")
+            count = listbox_buttons.count()
+            if count == 0:
+                return
+
+            for idx in range(count):
+                try:
+                    btn = listbox_buttons.nth(idx)
+                    if not btn.is_visible(timeout=1000):
+                        continue
+                    btn.click()
+                    self.page.wait_for_timeout(400)
+
+                    # Listbox is the sibling div with role="listbox"
+                    listbox = btn.locator("xpath=following-sibling::div[@role='listbox']").first
+                    if not listbox.is_visible(timeout=1000):
+                        continue
+
+                    # Options: role="option", exclude disabled and the "Select" placeholder
+                    options = listbox.locator(
+                        "div.listbox__option[role='option']:not([aria-disabled='true'])"
+                    )
+                    option_elements = options.all()
+                    selectable = []
+                    for opt in option_elements:
+                        try:
+                            value_span = opt.locator(".listbox__value").first
+                            if value_span.is_visible(timeout=0):
+                                text = value_span.inner_text().strip()
+                                if text and text != "Select":
+                                    selectable.append(opt)
+                        except Exception:
+                            pass
+
+                    if selectable:
+                        chosen = random.choice(selectable)
+                        chosen.scroll_into_view_if_needed()
+                        chosen.click()
+                        self.page.wait_for_timeout(300)
+                except Exception:
+                    continue
+        except Exception:
+            pass
+
     def add_item_to_cart(self, product_urls: list[str]) -> None:
         """
         Add multiple items to cart from product URLs.
@@ -495,7 +550,8 @@ class EbayPage(BasePage):
         For each URL:
         - Navigates to product page
         - Takes a screenshot
-        - Randomly selects color/size options if available
+        - If the product has customization options (RightSummaryPanel x-msku-evo listboxes),
+          randomly selects one valid option per listbox (e.g. Processor, SSD Size, O/S)
         - Adds product to cart
         - Returns to main page
         """
@@ -504,99 +560,24 @@ class EbayPage(BasePage):
         screenshots_dir = "reports/product_screenshots"
         os.makedirs(screenshots_dir, exist_ok=True)
 
-        for i, url in enumerate(product_urls, 1):
+        for i, url in enumerate(product_urls):
             try:
                 # Navigate to product page
                 self.page.goto(url)
                 self.page.wait_for_load_state("load", timeout=15000)
-
-                # Wait a bit for page to fully render
-                self.page.wait_for_timeout(1000)
 
                 # Take screenshot of product page
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 screenshot_path = f"{screenshots_dir}/product_{i}_{timestamp}.png"
                 self.page.screenshot(path=screenshot_path)
 
-                # Handle product options (color, size, etc.) - randomly select if available
-                try:
-                    # Try to find and select color option
-                    color_select = self.page.locator(
-                        self.COLOR_SELECTOR_XPATH).first
-                    if color_select.is_visible(timeout=2000):
-                        # Get all color options
-                        color_options = color_select.locator(
-                            "option:not([value='']):not([disabled])").all()
-                        if len(color_options) > 1:  # More than just the default/placeholder
-                            # Get option values
-                            option_values = []
-                            for opt in color_options:
-                                value = opt.get_attribute('value')
-                                if value and value.strip():
-                                    option_values.append(value)
-
-                            if option_values:
-                                # Randomly select a color
-                                selected_color = random.choice(option_values)
-                                color_select.select_option(
-                                    value=selected_color)
-                                # Wait for page to update
-                                self.page.wait_for_timeout(500)
-                except:
-                    pass  # No color selector available
-
-                try:
-                    # Try to find and select size option
-                    size_select = self.page.locator(
-                        self.SIZE_SELECTOR_XPATH).first
-                    if size_select.is_visible(timeout=2000):
-                        # Get all size options
-                        size_options = size_select.locator(
-                            "option:not([value='']):not([disabled])").all()
-                        if len(size_options) > 1:  # More than just the default/placeholder
-                            # Get option values
-                            option_values = []
-                            for opt in size_options:
-                                value = opt.get_attribute('value')
-                                if value and value.strip():
-                                    option_values.append(value)
-
-                            if option_values:
-                                # Randomly select a size
-                                selected_size = random.choice(option_values)
-                                size_select.select_option(value=selected_size)
-                                # Wait for page to update
-                                self.page.wait_for_timeout(500)
-                except:
-                    pass  # No size selector available
-
-                # Try generic option selectors if color/size didn't work
-                try:
-                    generic_selects = self.page.locator(
-                        self.OPTION_SELECTORS_XPATH).all()
-                    for select in generic_selects:
-                        if select.is_visible(timeout=1000):
-                            options = select.locator(
-                                "option:not([value='']):not([disabled])").all()
-                            if len(options) > 1:
-                                option_values = []
-                                for opt in options:
-                                    value = opt.get_attribute('value')
-                                    if value and value.strip():
-                                        option_values.append(value)
-
-                                if option_values:
-                                    selected_value = random.choice(
-                                        option_values)
-                                    select.select_option(value=selected_value)
-                                    self.page.wait_for_timeout(500)
-                except:
-                    pass
+                # Handle product customization options (SKU listboxes: Processor, SSD, O/S, etc.)
+                self._select_random_product_options()
 
                 # Add item to cart
                 try:
-                    add_to_cart_button = self.page.locator(
-                        self.ADD_TO_CART_XPATH).first
+                    add_to_cart_button = self.page.locator(self.ADD_TO_CART_XPATH).first
+
                     if add_to_cart_button.is_visible(timeout=3000):
                         add_to_cart_button.click()
                         # Wait for cart action to complete
@@ -604,21 +585,22 @@ class EbayPage(BasePage):
                 except Exception as e:
                     # If add to cart fails, log but continue
                     print(f"Failed to add item {i} to cart: {e}")
-
-                # Return to main page (eBay homepage)
-                self.navigate_to()
-                self.wait_for_page_load()
-
             except Exception as e:
                 # If processing a product fails, log and continue with next item
                 print(f"Error processing product {i} (URL: {url}): {e}")
-                # Try to return to main page even if there was an error
                 try:
                     self.navigate_to()
                     self.wait_for_page_load()
-                except:
+                except Exception:
                     pass
                 continue
+
+        # Return to main page so cart icon is available for subsequent actions
+        try:
+            self.navigate_to()
+            self.wait_for_page_load()
+        except Exception:
+            pass
 
     def assert_cart_total_not_exceeds(self, budget_per_item: float, item_count: int) -> None:
         """
@@ -632,12 +614,12 @@ class EbayPage(BasePage):
             AssertionError: If cart total exceeds the budget limit
         """
 
-        # Open the cart
-        self.click_cart()
+        # Open the cart (navigate by URL so we don't depend on header cart icon selector)
+        self.page.goto(self.CART_URL)
         self.page.wait_for_load_state("load", timeout=15000)
 
-        # Wait a bit for cart page to fully load
-        self.page.wait_for_timeout(1000)
+        # Wait for cart content to load (may be dynamic)
+        self.page.wait_for_timeout(3000)
 
         # Take screenshot of cart page
         screenshots_dir = "reports/product_screenshots"
@@ -650,60 +632,8 @@ class EbayPage(BasePage):
         # Calculate maximum allowed total
         max_total = item_count * budget_per_item
 
-        # Try to find cart total using multiple selectors
-        cart_total = None
-        cart_total_text = None
-
-        # Try cart total selector first
-        try:
-            total_element = self.page.locator(self.CART_TOTAL_XPATH).first
-
-            if total_element.is_visible(timeout=3000):
-                cart_total_text = total_element.inner_text()
-        except:
-            pass
-
-        # If not found, try subtotal selector
-        if not cart_total_text:
-            try:
-                subtotal_element = self.page.locator(self.CART_SUBTOTAL_XPATH).first
-                if subtotal_element.is_visible(timeout=3000):
-                    cart_total_text = subtotal_element.inner_text()
-            except:
-                pass
-
-        # If still not found, try to find any element containing total/subtotal text
-        if not cart_total_text:
-            try:
-                # Look for common cart total patterns
-                total_patterns = [
-                    "//span[contains(text(), 'Total') and contains(text(), '$')]",
-                    "//span[contains(text(), 'Subtotal') and contains(text(), '$')]",
-                    "//div[contains(text(), 'Total') and contains(text(), '$')]",
-                    "//*[contains(@class, 'total') and contains(text(), '$')]",
-                ]
-
-                for pattern in total_patterns:
-                    try:
-                        element = self.page.locator(pattern).first
-                        if element.is_visible(timeout=1000):
-                            cart_total_text = element.inner_text()
-                            break
-                    except:
-                        continue
-            except:
-                pass
-
-        # Extract numeric value from cart total text
-        if cart_total_text:
-            # Remove currency symbols and extract number
-            total_text = cart_total_text.replace('$', '').replace(',', '').strip()
-
-            # Extract first number (handles cases like "Total: $123.45")
-            match = re.search(r'(\d+\.?\d*)', total_text)
-
-            if match:
-                cart_total = float(match.group(1))
+        # Try to find cart total using multiple selectors and strategies
+        cart_total = self._parse_cart_total_from_page()
 
         # Assert that cart total does not exceed budget
         if cart_total is None:
@@ -716,3 +646,101 @@ class EbayPage(BasePage):
             f"Cart total ${cart_total:.2f} exceeds maximum allowed budget of ${max_total:.2f} "
             f"(${budget_per_item:.2f} per item × {item_count} items)"
         )
+
+    def _parse_cart_total_from_page(self) -> float | None:
+        """
+        Try multiple strategies to find and parse the cart total on the current page.
+        Returns the total as a float, or None if not found.
+        """
+        cart_total_text = None
+
+        # 1) Existing XPath/CSS selectors
+        try:
+            total_element = self.page.locator(self.CART_TOTAL_XPATH).first
+            if total_element.is_visible(timeout=2000):
+                cart_total_text = total_element.inner_text()
+        except Exception:
+            pass
+
+        if not cart_total_text:
+            try:
+                subtotal_element = self.page.locator(self.CART_SUBTOTAL_XPATH).first
+                if subtotal_element.is_visible(timeout=2000):
+                    cart_total_text = subtotal_element.inner_text()
+            except Exception:
+                pass
+
+        # 2) data-testid (eBay often uses these)
+        if not cart_total_text:
+            for testid in ("cart-summary-total", "cart-total", "subtotal", "summary-total"):
+                try:
+                    el = self.page.locator(f"[data-testid*='{testid}']").first
+                    if el.is_visible(timeout=1000):
+                        cart_total_text = el.inner_text()
+                        break
+                except Exception:
+                    continue
+
+        # 3) Text-based: elements containing "Total" or "Subtotal" and a currency amount
+        if not cart_total_text:
+            for label in ("Subtotal", "Total", "Order total", "Cart total"):
+                try:
+                    el = self.page.get_by_text(label, exact=False).first
+                    if el.is_visible(timeout=500):
+                        # Parent or following sibling often has the amount
+                        parent = el.locator("xpath=..")
+                        if parent.count():
+                            cart_total_text = parent.first.inner_text()
+                        if not cart_total_text or not re.search(r"[\d,]+\.?\d*", cart_total_text or ""):
+                            cart_total_text = el.inner_text()
+                        if cart_total_text and re.search(r"[\d,]+\.?\d*", cart_total_text):
+                            break
+                except Exception:
+                    continue
+
+        # 4) Any visible element that looks like a currency total (last resort)
+        if not cart_total_text:
+            try:
+                # Match elements whose text is mainly a price: optional $ £ etc and digits
+                price_locator = self.page.locator(
+                    "xpath=//*[contains(text(), '$') or contains(text(), '£') or contains(text(), 'USD') or contains(text(), 'GBP')]"
+                )
+                candidates = []
+                for i in range(min(price_locator.count(), 20)):
+                    try:
+                        node = price_locator.nth(i)
+                        if node.is_visible(timeout=0):
+                            text = node.inner_text()
+                            if text and re.search(r"[\d,]+\.?\d*", text):
+                                num = self._extract_price_number(text)
+                                if num is not None and 0 < num < 1_000_000:
+                                    candidates.append((num, text))
+                    except Exception:
+                        continue
+                if candidates:
+                    # Prefer the largest value that looks like a total (e.g. summary section)
+                    candidates.sort(key=lambda x: -x[0])
+                    cart_total_text = candidates[0][1]
+            except Exception:
+                pass
+
+        return self._extract_price_number(cart_total_text) if cart_total_text else None
+
+    def _extract_price_number(self, text: str | None) -> float | None:
+        """Extract a single price value from text (handles $1,234.56 and similar)."""
+        if not text:
+            return None
+        # Remove common currency symbols and spaces; keep digits, comma, dot
+        cleaned = re.sub(r"[^\d,.]", "", text)
+        # Find the last number that looks like a price (has decimal or is large)
+        matches = re.findall(r"[\d,]+\.?\d*", cleaned)
+        if not matches:
+            return None
+        # Take the largest number (total is usually the biggest amount on the line)
+        values = []
+        for m in matches:
+            try:
+                values.append(float(m.replace(",", "")))
+            except ValueError:
+                continue
+        return max(values) if values else None
