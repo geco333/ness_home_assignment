@@ -17,6 +17,143 @@ class BasePage:
         
         if self.page.url != self.base_url:
             self.page.goto(full_url, wait_until="load")
+            
+            # Check for modal popup and dismiss it if present
+            self._dismiss_modal_if_present()
+    
+    def _dismiss_modal_if_present(self):
+        """Check for and dismiss modal popup on page load with robust retry logic"""
+        try:
+            # Wait a bit for any dynamic content to load
+            self.page.wait_for_timeout(3000)
+
+            # Take a screenshot to debug what's on the page
+            debug_screenshot = "reports/debug_modal_check.png"
+            self.page.screenshot(path=debug_screenshot, full_page=True)
+            print(f"Debug screenshot saved to: {debug_screenshot}")
+
+            # Try multiple strategies to dismiss modals
+            modal_dismissed = False
+
+            # Strategy 1: Try specific selectors for common modal patterns
+            modal_selectors = [
+                '//*[@id="mainContent"]/div/div/form/button',  # Original specific selector
+                '//button[contains(@class, "modal") or contains(@class, "popup") or contains(@class, "dialog")]',
+                '//button[contains(text(), "Continue") or contains(text(), "Accept") or contains(text(), "Close") or contains(text(), "OK") or contains(text(), "Yes")]',
+                '//div[@role="dialog"]//button',
+                '//div[contains(@class, "modal")]//button',
+                '//div[contains(@class, "popup")]//button',
+                '//button[contains(@aria-label, "Close") or contains(@aria-label, "Dismiss")]',
+                '//button[@type="button" and contains(@class, "btn")]',
+                '//a[contains(@class, "close") or contains(@class, "dismiss")]',
+                '//span[contains(@class, "close") or contains(@class, "dismiss")]',
+                '//div[contains(@class, "overlay")]//button',
+                '//div[contains(@id, "modal")]//button',
+                '//div[contains(@id, "popup")]//button',
+                '//button[contains(@class, "close") or contains(@class, "x-close")]',
+                '//button[@aria-label="Close"]',
+                '//button[@data-testid="close-button"]'
+            ]
+
+            # Try each selector with retry logic
+            for selector in modal_selectors:
+                for attempt in range(2):  # Try each selector up to 2 times
+                    try:
+                        modal_button = self.page.locator(selector).first  # Use .first to avoid strict mode violations
+                        if modal_button.is_visible(timeout=2000):
+                            print(f"Modal popup detected with selector '{selector}' (attempt {attempt + 1}), dismissing...")
+
+                            # Get button text for debugging
+                            try:
+                                button_text = modal_button.inner_text(timeout=1000)
+                                print(f"Button text: '{button_text}'")
+                            except:
+                                print("Could not get button text")
+
+                            # Try to click the button
+                            modal_button.click(timeout=5000)
+
+                            # Wait for modal to close
+                            self.page.wait_for_timeout(2000)
+
+                            # Check if modal is gone by verifying the button is no longer visible
+                            if not modal_button.is_visible(timeout=1000):
+                                print("Modal popup successfully dismissed")
+                                modal_dismissed = True
+                                break
+                            else:
+                                print(f"Warning: Modal popup may not have closed properly with selector '{selector}'")
+                    except Exception as e:
+                        print(f"Failed to dismiss modal with selector '{selector}' (attempt {attempt + 1}): {e}")
+                        continue
+
+                if modal_dismissed:
+                    break
+
+            # Strategy 2: If specific selectors didn't work, try keyboard shortcuts
+            if not modal_dismissed:
+                print("Trying keyboard shortcuts to dismiss modal...")
+                try:
+                    # Try Escape key
+                    self.page.keyboard.press('Escape')
+                    self.page.wait_for_timeout(1000)
+
+                    # Check if any modal is still visible
+                    modal_check_selectors = [
+                        '//div[@role="dialog"]',
+                        '//div[contains(@class, "modal")]',
+                        '//div[contains(@class, "popup")]',
+                        '//div[contains(@class, "overlay")]'
+                    ]
+
+                    modal_still_present = False
+                    for check_selector in modal_check_selectors:
+                        if self.page.locator(check_selector).is_visible(timeout=1000):
+                            modal_still_present = True
+                            break
+
+                    if not modal_still_present:
+                        print("Modal dismissed successfully with Escape key")
+                        modal_dismissed = True
+
+                except Exception as e:
+                    print(f"Failed to dismiss modal with keyboard: {e}")
+
+            # Strategy 3: As last resort, try clicking outside the modal area
+            if not modal_dismissed:
+                print("Trying to click outside modal area...")
+                try:
+                    # Click on the top-left corner of the page (usually outside modal)
+                    self.page.mouse.click(10, 10)
+                    self.page.wait_for_timeout(1000)
+
+                    # Check again if modal is gone
+                    modal_still_present = False
+                    for check_selector in modal_check_selectors:
+                        if self.page.locator(check_selector).is_visible(timeout=1000):
+                            modal_still_present = True
+                            break
+
+                    if not modal_still_present:
+                        print("Modal dismissed successfully by clicking outside")
+                        modal_dismissed = True
+
+                except Exception as e:
+                    print(f"Failed to dismiss modal by clicking outside: {e}")
+
+            if not modal_dismissed:
+                print("Warning: No modal popup was found or could be dismissed")
+                # Take another screenshot to show what remains
+                final_screenshot = "reports/debug_modal_final.png"
+                self.page.screenshot(path=final_screenshot, full_page=True)
+                print(f"Final state screenshot saved to: {final_screenshot}")
+            else:
+                print("Modal dismissal process completed successfully")
+
+        except Exception as e:
+            print(f"Error during modal dismissal: {e}")
+            # Modal not present or couldn't be dismissed, continue normally
+            pass
     
     def find_element(self, selector: str) -> Locator:
         """Find an element by selector"""
