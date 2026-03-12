@@ -1,3 +1,4 @@
+import logging
 import os
 import random
 import re
@@ -6,6 +7,8 @@ from datetime import datetime
 from playwright.sync_api import Page
 
 from tests.pages.base_page import BasePage
+
+logger = logging.getLogger(__name__)
 
 
 class EbayPage(BasePage):
@@ -76,8 +79,8 @@ class EbayPage(BasePage):
     CART_CSS = "a#gh-cart-i"
 
     # Cart count badge
-    CART_COUNT_XPATH = "//span[@id='gh-cart-n']"
-    CART_COUNT_CSS = "span#gh-cart-n"
+    CART_COUNT_XPATH = "//*[@id='gh']/nav/div[2]/div[5]/div/a/span"
+    CART_COUNT_CSS = "#gh > nav > div.gh-nav__right-wrap > div.gh-cart > div > a > span"
 
     # Watchlist link
     WATCHLIST_XPATH = "//a[contains(@href, 'watchlist') or contains(text(), 'Watchlist')]"
@@ -210,12 +213,20 @@ class EbayPage(BasePage):
 
     def get_cart_count(self) -> str:
         """Get the number of items in cart with fallback mechanism"""
+
         cart_count_element = self.find_element_with_fallback(
             self.CART_COUNT_XPATH,
             self.CART_COUNT_CSS,
             timeout=2000  # Shorter timeout for optional element
         )
-        return cart_count_element.inner_text()
+
+        cart_aria_label = cart_count_element.get_attribute('aria-label')
+
+        if cart_aria_label:
+            if match := re.search(r'(\d+)', cart_aria_label):
+                return match.group(1)
+
+        raise Exception("No cart aria label found")
 
     def click_daily_deals(self):
         """Click Daily Deals link with fallback mechanism"""
@@ -364,12 +375,14 @@ class EbayPage(BasePage):
 
         # Perform the search
         self.search_for_item(query)
+
         # Use "load" instead of "networkidle" to avoid hanging on sites with ongoing requests (e.g. eBay)
         self.page.wait_for_load_state("load", timeout=15000)
 
         # Look for max price filter input (with timeout to avoid hanging if element missing)
         try:
             price_filter_input = self.page.locator(self.PRICE_FILTER_MAX_XPATH).first
+
             # Short timeout so we don't hang if selector is wrong or element not present
             price_filter_input.wait_for(state="visible", timeout=8000)
             price_filter_input.scroll_into_view_if_needed(timeout=5000)
@@ -384,7 +397,7 @@ class EbayPage(BasePage):
             # Wait for filtered results to load (use "load" to avoid hanging on networkidle)
             self.page.wait_for_load_state("load", timeout=15000)
         except Exception as e:
-            print(f"Price filter step skipped or failed: {e}. Continuing to collect items.")
+            logger.warning(f"Price filter step skipped or failed: {e}. Continuing to collect items.")
 
         items: list[str] = []
         page_count = 0
@@ -398,12 +411,12 @@ class EbayPage(BasePage):
                 result_items = self.page.locator(self.SEARCH_RESULT_ITEMS_XPATH).all()
 
                 if not result_items or len(result_items) == 0:
-                    print(f"No result items found on page {page_count + 1}")
+                    logger.debug(f"No result items found on page {page_count + 1}")
                     break
 
-                print(f"Found {len(result_items)} result items on page {page_count + 1}")
+                logger.info(f"Found {len(result_items)} result items on page {page_count + 1}")
             except Exception as e:
-                print(f"No search results found on page {page_count + 1}: {e}")
+                logger.error(f"No search results found on page {page_count + 1}: {e}")
                 break
 
             for i, item in enumerate(result_items, start=1):
@@ -426,8 +439,6 @@ class EbayPage(BasePage):
                     # Only include items with price <= max_price
                     if price <= max_price:
                         # Try multiple methods to get URL
-                        url = None
-
                         url = item.locator(f"//{self.ITEM_URL_XPATH}").first.get_attribute('href')
 
                         # Clean and validate URL
@@ -455,10 +466,10 @@ class EbayPage(BasePage):
                             # Avoid duplicates
                             if url and url not in items:
                                 items.append(url)
-                                print(f"Collected URL {len(items)}/{limit}: {url[:80]}...")
+                                logger.debug(f"Collected URL {len(items)}/{limit}: {url[:80]}...")
                 except Exception as e:
                     # Skip items that can't be processed
-                    print(f"Error processing item: {e}")
+                    logger.error(f"Error processing item: {e}")
                     continue
 
             # Check if we need more items and if there's a next page
@@ -580,20 +591,29 @@ class EbayPage(BasePage):
 
                     if add_to_cart_button.is_visible(timeout=3000):
                         add_to_cart_button.click()
+
                         # Wait for cart action to complete
                         self.page.wait_for_timeout(2000)
+
+                        # Check for and dismiss any popup that might have opened after adding to cart
+                        self._dismiss_modal_if_present()
+                    else:
+                        logging.warning(
+                            f"Add to Cart button not visible for item {i} (URL: {url}). Skipping add to cart.")
+
+                        # Take screenshot of cart page
+                        screenshots_dir = "reports/product_screenshots"
+                        os.makedirs(screenshots_dir, exist_ok=True)
+
+                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        screenshot_path = f"{screenshots_dir}/cart_{timestamp}.png"
+                        self.page.screenshot(path=screenshot_path)
                 except Exception as e:
                     # If add to cart fails, log but continue
-                    print(f"Failed to add item {i} to cart: {e}")
+                    raise f"Failed to add item {i} to cart: {e}"
             except Exception as e:
                 # If processing a product fails, log and continue with next item
-                print(f"Error processing product {i} (URL: {url}): {e}")
-                try:
-                    self.navigate_to()
-                    self.wait_for_page_load()
-                except Exception:
-                    pass
-                continue
+                raise f"Error processing product {i} (URL: {url}): {e}"
 
         # Return to main page so cart icon is available for subsequent actions
         try:

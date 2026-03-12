@@ -1,5 +1,8 @@
+import logging
 from playwright.sync_api import Browser, BrowserContext, Page, sync_playwright
 from config.settings import Settings
+
+logger = logging.getLogger(__name__)
 
 
 class BrowserFactory:
@@ -48,4 +51,4 @@ class BrowserFactory:
         try:
             browser.close()
         except Exception as e:
-            print(f"Error closing browser: {e}")
+            logger.error(f"Error closing browser: {e}")

@@ -1,6 +1,9 @@
+import logging
 from typing import Optional, List
 from playwright.sync_api import Page, Locator, TimeoutError as PlaywrightTimeoutError
 from config.settings import Settings
+
+logger = logging.getLogger(__name__)
 
 
 class BasePage:
@@ -30,7 +33,7 @@ class BasePage:
             # Take a screenshot to debug what's on the page
             debug_screenshot = "reports/debug_modal_check.png"
             self.page.screenshot(path=debug_screenshot, full_page=True)
-            print(f"Debug screenshot saved to: {debug_screenshot}")
+            logger.debug(f"Debug screenshot saved to: {debug_screenshot}")
 
             # Try multiple strategies to dismiss modals
             modal_dismissed = False
@@ -52,7 +55,8 @@ class BasePage:
                 '//div[contains(@id, "popup")]//button',
                 '//button[contains(@class, "close") or contains(@class, "x-close")]',
                 '//button[@aria-label="Close"]',
-                '//button[@data-testid="close-button"]'
+                '//button[@data-testid="close-button"]',
+                '//*[@id="mainContent"]/div/div[7]/div/div[2]/div[4]/div/button',
             ]
 
             # Try each selector with retry logic
@@ -61,14 +65,14 @@ class BasePage:
                     try:
                         modal_button = self.page.locator(selector).first  # Use .first to avoid strict mode violations
                         if modal_button.is_visible(timeout=2000):
-                            print(f"Modal popup detected with selector '{selector}' (attempt {attempt + 1}), dismissing...")
+                            logger.info(f"Modal popup detected with selector '{selector}' (attempt {attempt + 1}), dismissing...")
 
                             # Get button text for debugging
                             try:
                                 button_text = modal_button.inner_text(timeout=1000)
-                                print(f"Button text: '{button_text}'")
+                                logger.debug(f"Button text: '{button_text}'")
                             except:
-                                print("Could not get button text")
+                                logger.debug("Could not get button text")
 
                             # Try to click the button
                             modal_button.click(timeout=5000)
@@ -78,13 +82,13 @@ class BasePage:
 
                             # Check if modal is gone by verifying the button is no longer visible
                             if not modal_button.is_visible(timeout=1000):
-                                print("Modal popup successfully dismissed")
+                                logger.info("Modal popup successfully dismissed")
                                 modal_dismissed = True
                                 break
                             else:
-                                print(f"Warning: Modal popup may not have closed properly with selector '{selector}'")
+                                logger.warning(f"Warning: Modal popup may not have closed properly with selector '{selector}'")
                     except Exception as e:
-                        print(f"Failed to dismiss modal with selector '{selector}' (attempt {attempt + 1}): {e}")
+                        logger.error(f"Failed to dismiss modal with selector '{selector}' (attempt {attempt + 1}): {e}")
                         continue
 
                 if modal_dismissed:
@@ -92,7 +96,7 @@ class BasePage:
 
             # Strategy 2: If specific selectors didn't work, try keyboard shortcuts
             if not modal_dismissed:
-                print("Trying keyboard shortcuts to dismiss modal...")
+                logger.info("Trying keyboard shortcuts to dismiss modal...")
                 try:
                     # Try Escape key
                     self.page.keyboard.press('Escape')
@@ -113,15 +117,15 @@ class BasePage:
                             break
 
                     if not modal_still_present:
-                        print("Modal dismissed successfully with Escape key")
+                        logger.info("Modal dismissed successfully with Escape key")
                         modal_dismissed = True
 
                 except Exception as e:
-                    print(f"Failed to dismiss modal with keyboard: {e}")
+                    logger.error(f"Failed to dismiss modal with keyboard: {e}")
 
             # Strategy 3: As last resort, try clicking outside the modal area
             if not modal_dismissed:
-                print("Trying to click outside modal area...")
+                logger.info("Trying to click outside modal area...")
                 try:
                     # Click on the top-left corner of the page (usually outside modal)
                     self.page.mouse.click(10, 10)
@@ -135,23 +139,23 @@ class BasePage:
                             break
 
                     if not modal_still_present:
-                        print("Modal dismissed successfully by clicking outside")
+                        logger.info("Modal dismissed successfully by clicking outside")
                         modal_dismissed = True
 
                 except Exception as e:
-                    print(f"Failed to dismiss modal by clicking outside: {e}")
+                    logger.error(f"Failed to dismiss modal by clicking outside: {e}")
 
             if not modal_dismissed:
-                print("Warning: No modal popup was found or could be dismissed")
+                logger.info("No modal popup was found or could be dismissed")
                 # Take another screenshot to show what remains
                 final_screenshot = "reports/debug_modal_final.png"
                 self.page.screenshot(path=final_screenshot, full_page=True)
-                print(f"Final state screenshot saved to: {final_screenshot}")
+                logger.debug(f"Final state screenshot saved to: {final_screenshot}")
             else:
-                print("Modal dismissal process completed successfully")
+                logger.info("Modal dismissal process completed successfully")
 
         except Exception as e:
-            print(f"Error during modal dismissal: {e}")
+            logger.error(f"Error during modal dismissal: {e}")
             # Modal not present or couldn't be dismissed, continue normally
             pass
     
@@ -261,11 +265,13 @@ class BasePage:
                 "[data-testid='element']"
             )
         """
+
         if not selectors:
             raise ValueError("At least one selector must be provided")
         
         # Flatten selectors if a list is passed as first argument
         selector_list: List[str] = []
+
         if len(selectors) == 1 and isinstance(selectors[0], list):
             selector_list = list(selectors[0])
         else:
