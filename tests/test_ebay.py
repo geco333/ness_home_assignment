@@ -5,6 +5,16 @@ from playwright.sync_api import Page
 from tests.pages.ebay_page import EbayPage
 
 
+@pytest.fixture(scope="session")
+def shared_data():
+    return {
+        "query": "laptop",
+        "max_price": 500.0,
+        "limit": 3,
+        "product_urls": [],
+    }
+
+
 @allure.epic("eBay Tests")
 @allure.feature("Homepage Navigation")
 @pytest.mark.smoke
@@ -24,13 +34,15 @@ def test_ebay_homepage_loads(page: Page, playwright_browser_name):
 @allure.epic("eBay Tests")
 @allure.feature("Search with Price Filter")
 @pytest.mark.regression
-def test_ebay_search_with_price_filter(page: Page, playwright_browser_name: str):
+def test_ebay_search_with_price_filter(page: Page,
+                                       playwright_browser_name: str,
+                                       shared_data: dict):
     """Test eBay search with price filtering and pagination"""
 
     ebay_page = EbayPage(page)
-    query = "laptop"
-    max_price = 500.0
-    limit = 5
+    query = shared_data['query']
+    max_price = shared_data['max_price']
+    limit = shared_data['limit']
 
     with allure.step(f"Search for '{query}' with max price ${max_price} on {playwright_browser_name}"):
         items = ebay_page.search_items_by_name_under_price(
@@ -68,24 +80,21 @@ def test_ebay_search_with_price_filter(page: Page, playwright_browser_name: str)
             attachment_type=allure.attachment_type.TEXT
         )
 
+    shared_data['product_urls'] = items
+
 
 @allure.epic("eBay Tests")
 @allure.feature("Add Items to Cart")
 @pytest.mark.regression
-def test_ebay_add_items_to_cart(page: Page, playwright_browser_name: str):
+def test_ebay_add_items_to_cart(page: Page,
+                                playwright_browser_name: str,
+                                shared_data: dict):
     """Test adding multiple items to cart from search results"""
 
     ebay_page = EbayPage(page)
-    query = "laptop"
-    max_price = 500.0
-    limit = 3  # Limit to 3 items for testing
-
-    with allure.step(f"Search for '{query}' with max price ${max_price} on {playwright_browser_name}"):
-        product_urls = ebay_page.search_items_by_name_under_price(
-            query=query,
-            max_price=max_price,
-            limit=limit
-        )
+    query = shared_data['query']
+    max_price = shared_data['max_price']
+    product_urls = shared_data['product_urls']
 
     with allure.step(f"Verify product URLs were found on {playwright_browser_name}"):
         assert len(product_urls) > 0, \
@@ -122,30 +131,15 @@ def test_ebay_add_items_to_cart(page: Page, playwright_browser_name: str):
 @allure.epic("eBay Tests")
 @allure.feature("Cart Total Assertion")
 @pytest.mark.regression
-def test_cart_total_does_not_exceed_budget(page: Page, playwright_browser_name: str):
+def test_cart_total_does_not_exceed_budget(page: Page,
+                                           playwright_browser_name: str,
+                                           shared_data: dict):
     """Test that cart total does not exceed budget_per_item * item_count after adding items."""
 
     ebay_page = EbayPage(page)
-    query = "laptop"
-    budget_per_item = 500.0
-    limit = 3
-
-    with allure.step(f"Search for '{query}' with max price ${budget_per_item} on {playwright_browser_name}"):
-        product_urls = ebay_page.search_items_by_name_under_price(
-            query=query,
-            max_price=budget_per_item,
-            limit=limit
-        )
-
-        allure.attach(
-            f"Found {len(product_urls)} product URLs",
-            name="Products to Add",
-            attachment_type=allure.attachment_type.TEXT
-        )
-
-    with allure.step(f"Verify product URLs were found on {playwright_browser_name}"):
-        assert len(product_urls) > 0, \
-            f"Should find at least one product for '{query}' with max price ${budget_per_item} on {playwright_browser_name}"
+    product_urls = shared_data['product_urls']
+    limit = shared_data['limit']
+    budget_per_item = shared_data['limit'] * shared_data['max_price']
 
     with allure.step(f"Add items to cart on {playwright_browser_name}"):
         ebay_page.add_item_to_cart(product_urls)

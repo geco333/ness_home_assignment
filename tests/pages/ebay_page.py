@@ -392,10 +392,23 @@ class EbayPage(BasePage):
             price_filter_input.press_sequentially(filled_price)
 
             apply_button = self.page.locator(self.PRICE_FILTER_APPLY_XPATH).first
+            apply_button.wait_for(state="visible", timeout=5000)
+            apply_button.scroll_into_view_if_needed(timeout=5000)
+
+            logger.info("Price filter apply button found and visible, clicking it...")
             apply_button.click(timeout=5000)
 
             # Wait for filtered results to load (use "load" to avoid hanging on networkidle)
             self.page.wait_for_load_state("load", timeout=15000)
+
+            # Click on the 'Buy it now' filter radio button
+            price_filter_checkbox = self.page.locator(
+                "//*[@id='x-refine__group__6']/ul/li[3]/div/a/label/div/span/input").first
+            price_filter_checkbox.wait_for(state="visible", timeout=5000)
+            price_filter_checkbox.scroll_into_view_if_needed(timeout=5000)
+
+            logger.info("Price filter checkbox found and visible, clicking it...")
+            price_filter_checkbox.click(timeout=5000)
         except Exception as e:
             logger.warning(f"Price filter step skipped or failed: {e}. Continuing to collect items.")
 
@@ -598,16 +611,28 @@ class EbayPage(BasePage):
                         # Check for and dismiss any popup that might have opened after adding to cart
                         self._dismiss_modal_if_present()
                     else:
+                        # Check if this is an auction-only item (no Buy It Now option)
+                        try:
+                            bid_button = self.page.locator("//*[@id='bidBtn_btn']").first
+
+                            if bid_button.is_visible(timeout=1000):
+                                logger.info(f"Item is auction-only (bid button found), skipping add to cart. URL: {url}")
+                                
+                                # Take screenshot of auction-only item
+                                screenshots_dir = "reports/product_screenshots"
+                                os.makedirs(screenshots_dir, exist_ok=True)
+                                
+                                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                                screenshot_path = f"{screenshots_dir}/auction_only_item_{i}_{timestamp}.png"
+                                self.page.screenshot(path=screenshot_path)
+                                
+                                # Skip this item and continue to next one
+                                continue
+                        except Exception:
+                            pass  # Bid button not found, continue with normal flow
+                        
                         logging.warning(
                             f"Add to Cart button not visible for item {i} (URL: {url}). Skipping add to cart.")
-
-                        # Take screenshot of cart page
-                        screenshots_dir = "reports/product_screenshots"
-                        os.makedirs(screenshots_dir, exist_ok=True)
-
-                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                        screenshot_path = f"{screenshots_dir}/cart_{timestamp}.png"
-                        self.page.screenshot(path=screenshot_path)
                 except Exception as e:
                     # If add to cart fails, log but continue
                     raise f"Failed to add item {i} to cart: {e}"
